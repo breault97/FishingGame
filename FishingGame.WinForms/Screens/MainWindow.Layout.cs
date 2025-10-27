@@ -95,9 +95,12 @@ namespace FishingGame.WinForms.Screens
 
             _drawStack.BringToFront();
             _depositStack.BringToFront();
-
+            
             // L’overlay reste au-dessus de tout
             AnimHost.BringToFront();
+            
+            // La PictureBox de la défausse se repeint avec l’overlay centré
+            _depositStack.ImageBox.Invalidate();
         }
         
         private static List<Player> BuildRing(Player start)

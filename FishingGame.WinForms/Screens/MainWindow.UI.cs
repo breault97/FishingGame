@@ -260,6 +260,9 @@ namespace FishingGame.WinForms.Screens
             _table.Controls.Add(_depositStack);
             _drawStack.BringToFront();
             _depositStack.BringToFront();
+            
+            // >>> DESSIN overlay couleur via PAINT de la PictureBox de la défausse
+            _depositStack.ImageBox.Paint += DepositColorOverlay_Paint;
 
             _drawStack.ImageBox.SizeMode    = PictureBoxSizeMode.Zoom;
             _depositStack.ImageBox.SizeMode = PictureBoxSizeMode.Zoom;
@@ -568,6 +571,30 @@ namespace FishingGame.WinForms.Screens
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             BeginInvoke(new Action(() => tcs.SetResult()));
             return tcs.Task;
+        }
+        
+        // Dessin de l’overlay couleur directement dans la PictureBox de la défausse
+        private void DepositColorOverlay_Paint(object? sender, PaintEventArgs e)
+        {
+            if (!_colorOverlayVisible || _colorOverlayImg == null) return;
+
+            var pb = (PictureBox)sender!;
+            int w = Math.Min(COLOR_OVERLAY_PX, pb.ClientSize.Width);
+            int h = Math.Min(COLOR_OVERLAY_PX, pb.ClientSize.Height);
+
+            // garder le ratio source
+            double ar = _colorOverlayImg.Width / (double)_colorOverlayImg.Height;
+            if (w / (double)h > ar) w = (int)(h * ar);
+            else                     h = (int)(w / ar);
+
+            var x = (pb.ClientSize.Width  - w) / 2;
+            var y = (pb.ClientSize.Height - h) / 2;
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            e.Graphics.DrawImage(_colorOverlayImg, new Rectangle(x, y, w, h));
         }
     }
 }

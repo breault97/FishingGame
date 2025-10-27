@@ -1,6 +1,8 @@
-﻿using FishingGame.Domain.Class;
+﻿﻿using FishingGame.Domain.Class;
 using FishingGame.Domain.Struct;
 using FishingGame.WinForms.Controls;
+using System.Windows.Forms;
+using System.Drawing;
 
 namespace FishingGame.WinForms.Screens
 {
@@ -84,6 +86,11 @@ namespace FishingGame.WinForms.Screens
         // Piles au centre : contrôles custom avec ombre + PictureBox interne
         private readonly ShadowStack _drawStack    = new() { Width = 130, Height = 180 };
         private readonly ShadowStack _depositStack = new() { Width = 130, Height = 180 };
+
+        // === Overlay couleur : désormais DESSINÉ dans Paint de _depositStack.ImageBox ===
+        private Image? _colorOverlayImg;          // image de l’icône ♣ ♦ ♥ ♠
+        private bool   _colorOverlayVisible;      // affichage oui/non
+        private const int COLOR_OVERLAY_PX = 64;  // taille cible (carrée) dans la défausse
 
         // Couche d'animation
         private Control AnimHost => _table;

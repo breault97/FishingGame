@@ -290,6 +290,31 @@ namespace FishingGame.WinForms.Screens
             _btnReset.Enabled = running;
             _btnStep.Enabled  = running && !_auto;
         }
+        
+        /// <summary>
+        /// Méthode d'aide pour extraire la couleur et afficher l’overlay
+        /// Examine un message d'information et affiche l'overlay de couleur si celui-ci indique
+        /// qu'un joueur a choisi une couleur avec un Valet.
+        /// </summary>
+        private void MaybeShowColor(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return;
+            
+            var trimmed = message.Trim();
+            if (trimmed.StartsWith("Couleur choisie"))
+            {
+                // Recherche du symbole après le ':'
+                var idx = trimmed.IndexOf(':');
+                if (idx >= 0 && idx < trimmed.Length - 1)
+                {
+                    var symbol = trimmed.Substring(idx + 1).Trim();
+                    if (symbol == "♣") ShowColorOverlay(COLOR_TYPE.CLUBS);
+                    else if (symbol == "♦") ShowColorOverlay(COLOR_TYPE.DIAMONDS);
+                    else if (symbol == "♥") ShowColorOverlay(COLOR_TYPE.HEARTS);
+                    else if (symbol == "♠") ShowColorOverlay(COLOR_TYPE.SPADES);
+                }
+            }
+        }
 
         // ───────────────────────────────────────────────────────────────────────
         // HANDLERS — visibles : seulement les infos “partie”
@@ -424,12 +449,18 @@ namespace FishingGame.WinForms.Screens
                 {
                     AddInfo(e.Message);
                     RenderActiveBadgeUI();
+                    // Détection couleur choisie
+                    MaybeShowColor(e.Message);
                 }));
                 return;
             }
 
             AddInfo(e.Message);
-            BeginInvoke(new Action(RenderActiveBadgeUI));
+            BeginInvoke(new Action(() =>
+            {
+                RenderActiveBadgeUI();
+                MaybeShowColor(e.Message);
+            }));
             AfterActionGate(); // bloquant côté moteur uniquement
         }
 

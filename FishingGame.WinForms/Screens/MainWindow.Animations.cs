@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using FishingGame.Domain.Class;
+using FishingGame.Domain.Enums;
 using FishingGame.Domain.Events;
 using FishingGame.Domain.Struct;
 
@@ -68,6 +69,7 @@ namespace FishingGame.WinForms.Screens
             if (!IsDisposed) BeginInvoke(new Action(() =>
             {
                 _depositStack.Image = LoadCardImage(e.PlayedCard!.Value);
+                HideColorOverlay(); // on masque l’overlay dès que la défausse change
             }));
         }
 
@@ -81,18 +83,7 @@ namespace FishingGame.WinForms.Screens
                 var img = LoadCardImage(card);
                 if (img == null) { DebugLog("   [ANIM] No image"); return; }
 
-                (Point start, Point end) = (Point.Empty, Point.Empty);
-                try
-                {
-                    DebugLog("   [ANIM] Compute centers (UI_SYNC)...");
-                    (start, end) = GetCenters_PlayToDeposit_UI(player);
-                    DebugLog($"   [ANIM] Centers ok: start={start} end={end}");
-                }
-                catch (Exception ex)
-                {
-                    DebugLog($"   [ANIM ERR] GetCenters: {ex.Message}");
-                }
-
+                (Point start, Point end) = GetCenters_PlayToDeposit_UI(player);
                 if (start == Point.Empty || end == Point.Empty)
                 {
                     DebugLog("   [ANIM] Empty centers → fallback delay");
@@ -100,11 +91,17 @@ namespace FishingGame.WinForms.Screens
                     return;
                 }
 
-                int durationMs = Math.Max(260, Math.Min(900, (int)(_delayMs * 0.8)));
+                var durationMs = Math.Max(260, Math.Min(900, (int)(_delayMs * 0.8)));
                 DebugLog($"   [ANIM] Start anim ({durationMs}ms)…");
 
-                // attend la vraie fin de l’anim
-                await AnimateImageAsync(img, start, end, durationMs, ct);
+                // Si ce n'est pas le joueur humain, on démarre avec l'image du dos de la carte
+                // et on la retourne en cours d'animation.
+                var isHuman = _humanPlayer != null && player == _humanPlayer;
+                Image startImg = isHuman ? img : (_cardBack ?? img);
+                Image? flipImg = isHuman ? null : img;
+
+                // On passe flipImg en paramètre pour retourner la carte en cours d’animation
+                await AnimateImageAsync(startImg, start, end, durationMs, ct, flipImg);
 
                 DebugLog("   [ANIM] Delay done");
             }
@@ -140,13 +137,19 @@ namespace FishingGame.WinForms.Screens
         }
 
         // Moteur d’animation unique (sans Timer, 100% async/await, sûr et robuste)
-        private async Task AnimateImageAsync(Image img, Point start, Point end, int durationMs, CancellationToken ct)
+        // Ajoute la possibilité de retourner la carte en cours d’animation via le paramètre flipImage.
+        private async Task AnimateImageAsync(
+            Image img,
+            Point start,
+            Point end,
+            int durationMs,
+            CancellationToken ct,
+            Image? flipImage = null)
         {
             if (img == null) return;
             durationMs = Math.Max(1, durationMs);
 
             PictureBox? pb = null;
-            // Crée le sprite sur le thread UI
             await UI(() =>
             {
                 pb = new PictureBox
@@ -159,12 +162,14 @@ namespace FishingGame.WinForms.Screens
                     Tag       = "anim-sprite"
                 };
                 AnimHost.Controls.Add(pb);
-                AnimHost.BringToFront();
-                pb!.Left = start.X - pb.Width  / 2;
-                pb!.Top  = start.Y - pb.Height / 2;
+                // Place le sprite au-dessus des piles (défausse incluse)
+                pb.BringToFront();
+                pb.Left = start.X - pb.Width  / 2;
+                pb.Top  = start.Y - pb.Height / 2;
             });
 
             var sw = Stopwatch.StartNew();
+            var flipApplied = false;
             try
             {
                 while (true)
@@ -179,11 +184,20 @@ namespace FishingGame.WinForms.Screens
 
                     await UI(() =>
                     {
-                        if (!pb.IsDisposed) pb.Location = new Point(x, y);
+                        if (!pb.IsDisposed)
+                        {
+                            pb.Location = new Point(x, y);
+                            // à mi-chemin, si flipImage est fourni et pas encore appliqué, on retourne la carte
+                            if (!flipApplied && flipImage != null && t >= 0.5)
+                            {
+                                pb.Image = flipImage;
+                                flipApplied = true;
+                            }
+                        }
                     });
 
                     if (t >= 1.0) break;
-                    await Task.Delay(15, ct); // cadence ~66 FPS
+                    await Task.Delay(15, ct);
                 }
             }
             finally
@@ -205,16 +219,43 @@ namespace FishingGame.WinForms.Screens
             Point s = Point.Empty, e = Point.Empty;
             UI_SYNC(() =>
             {
-                var from = GetHandHostFor(player);
-                s = CenterOf(from, AnimHost);
+                var host = GetHandHostFor(player);
+                s = CenterOf(host, AnimHost);
                 e = CenterOf(_depositStack.ImageBox, AnimHost);
+
+                if (s != Point.Empty && host != null)
+                {
+                    // Dimensions du sprite animé (identiques à AnimateImageAsync)
+                    const int SPRITE_W = 120;
+                    const int SPRITE_H = 170;
+                    const int MARGIN   = 8;
+
+                    int dxEdge = Math.Max(0, host.Width  / 2 - SPRITE_W / 2 - MARGIN);
+                    int dyEdge = Math.Max(0, host.Height / 2 - SPRITE_H / 2 - MARGIN);
+
+                    // Départ au bord logique de la main en fonction de sa position
+                    if (ReferenceEquals(host, _bottomHand))
+                    {
+                        // La défausse est au-dessus de la main du bas → partir du bord supérieur
+                        s.Offset(0, -dyEdge);
+                    }
+                    else if (ReferenceEquals(host, _leftHand))
+                    {
+                        // La défausse est à droite de la main gauche → partir du bord droit
+                        s.Offset(+dxEdge, 0);
+                    }
+                    else if (ReferenceEquals(host, _rightHand))
+                    {
+                        // La défausse est à gauche de la main droite → partir du bord gauche
+                        s.Offset(-dxEdge, 0);
+                    }
+                }
             });
             return (s, e);
         }
 
         private (Point start, Point end) GetCenters_DrawToHand_UI(Player current)
         {
-            // dimensions du sprite animé (mêmes que dans AnimateImageAsync)
             const int SPRITE_W = 120;
             const int SPRITE_H = 170;
             const int MARGIN   = 8;
@@ -229,33 +270,69 @@ namespace FishingGame.WinForms.Screens
                 // Centre de l'hôte cible (main du joueur courant)
                 var host = GetHandHostFor(current);
                 e = CenterOf(host, AnimHost);
-                if (e == Point.Empty) return;
+                if (e == Point.Empty || host == null) return;
 
-                // Calcule un décalage pour atterrir près du bord "logique" de la main,
-                // en laissant une marge et en tenant compte du demi-sprite.
                 int dxEdge = Math.Max(0, host.Width  / 2 - SPRITE_W / 2 - MARGIN);
                 int dyEdge = Math.Max(0, host.Height / 2 - SPRITE_H / 2 - MARGIN);
 
-                if (ReferenceEquals(host, _rightHand))
+                // Arrivée au bord logique de la main vers la pioche
+                if (ReferenceEquals(host, _bottomHand))
                 {
-                    // Aller vers la droite (cartes empilées côté droit)
-                    e.Offset(+dxEdge, 0);
+                    // La pioche est au-dessus de la main du bas → viser le bord supérieur
+                    e.Offset(0, -dyEdge);
                 }
                 else if (ReferenceEquals(host, _leftHand))
                 {
-                    // Aller vers la gauche
+                    // La pioche est à droite de la main gauche → viser le bord droit
+                    e.Offset(+dxEdge, 0);
+                }
+                else if (ReferenceEquals(host, _rightHand))
+                {
+                    // La pioche est à gauche de la main droite → viser le bord gauche
                     e.Offset(-dxEdge, 0);
                 }
-                else if (ReferenceEquals(host, _bottomHand))
-                {
-                    // Aller vers le bas
-                    e.Offset(0, +dyEdge);
-                }
-                // Si un autre siège existait (haut), on ferait e.Offset(0, -dyEdge);
             });
 
             return (s, e);
         }
+        
+        // Charge et affiche l’icône correspondant à la couleur choisie
+        private void ShowColorOverlay(COLOR_TYPE color)
+        {
+            try
+            {
+                var fileName = color switch
+                {
+                    COLOR_TYPE.CLUBS    => "clubs.png",
+                    COLOR_TYPE.DIAMONDS => "diamonds.png",
+                    COLOR_TYPE.HEARTS   => "hearts.png",
+                    COLOR_TYPE.SPADES   => "spade.png",
+                    _ => ""
+                };
+                if (string.IsNullOrEmpty(fileName)) return;
+                
+                var path = Path.Combine(AppContext.BaseDirectory, "Assets", "Color", fileName);
+                if (!File.Exists(path)) return;
+                    
+                // Libère l'image précédente pour éviter des verrous sur fichier
+                _colorOverlayImg?.Dispose();
+                _colorOverlayImg = Image.FromFile(path);
+                _colorOverlayVisible = true;
+                _depositStack.ImageBox.Invalidate(); // déclenche Paint pour dessiner l’icône
+            }
+            catch { /* ignore */ }
+        }
 
+        // Masque l’icône et libère l’image
+        private void HideColorOverlay()
+        {
+            _colorOverlayVisible = false;
+            if (_colorOverlayImg != null)
+            {
+                _colorOverlayImg.Dispose();
+                _colorOverlayImg = null;
+            }
+            _depositStack.ImageBox.Invalidate();
+        }
     }
 }
