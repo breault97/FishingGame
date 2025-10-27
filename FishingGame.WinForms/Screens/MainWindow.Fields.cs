@@ -86,6 +86,10 @@ namespace FishingGame.WinForms.Screens
         // Piles au centre : contrôles custom avec ombre + PictureBox interne
         private readonly ShadowStack _drawStack    = new() { Width = 130, Height = 180 };
         private readonly ShadowStack _depositStack = new() { Width = 130, Height = 180 };
+        
+        // --- Taille des piles (draw/deposit) ---
+        private Size _stackBaseSize;      // mémorise la taille initiale
+        private const float STACK_SCALE = 1.25f; // +25%
 
         // === Overlay couleur : désormais DESSINÉ dans Paint de _depositStack.ImageBox ===
         private Image? _colorOverlayImg;          // image de l’icône ♣ ♦ ♥ ♠
@@ -100,6 +104,10 @@ namespace FishingGame.WinForms.Screens
         private readonly Button _btnReset = new() { Text = "Reset" };
         private readonly CheckBox _chkAuto = new() { Text = "Auto", Checked = true, ForeColor = Color.White, AutoSize = true };
         private readonly Button _btnStep = new() { Text = "Pas à pas", Enabled = false };
+        
+        // Sélecteur de dos de cartes
+        private readonly Button _btnBackStyle = new() { Text = "Dos : Bleu" };
+        private readonly ContextMenuStrip _menuBacks = new();
         
         // Journal (haut-centre)
         private readonly RichTextBox _journal = new()

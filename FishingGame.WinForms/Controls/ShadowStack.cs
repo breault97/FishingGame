@@ -11,7 +11,12 @@ namespace FishingGame.WinForms.Controls
         public Image? Image
         {
             get => ImageBox.Image;
-            set { ImageBox.Image = value; Invalidate(); }
+            set
+            {
+                if (!ReferenceEquals(ImageBox.Image, value))
+                    ImageBox.Image = value;
+                Invalidate();
+            }
         }
         
         private Size _cardSize = new Size(90, 130);
@@ -25,7 +30,7 @@ namespace FishingGame.WinForms.Controls
                      ControlStyles.ResizeRedraw |
                      ControlStyles.SupportsTransparentBackColor, true);
 
-            Padding   = new Padding(8);       // bord pour peindre l’ombre
+            Padding   = new Padding(14);       // bord pour peindre l’ombre
             BackColor = Color.Transparent;
 
             ImageBox = new PictureBox
@@ -33,7 +38,9 @@ namespace FishingGame.WinForms.Controls
                 BackColor = Color.Transparent,
                 SizeMode  = PictureBoxSizeMode.Zoom,
                 Dock      = DockStyle.Fill,
-                Margin    = new Padding(0)
+                Margin    = new Padding(0),
+                InitialImage  = null,   // << empêche l’icône "chargement"
+                ErrorImage    = null    // << empêche la croix rouge WinForms
             };
             Controls.Add(ImageBox);
 

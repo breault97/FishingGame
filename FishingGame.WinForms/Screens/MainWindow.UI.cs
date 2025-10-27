@@ -178,6 +178,18 @@ namespace FishingGame.WinForms.Screens
             toolbar.Controls.Add(_btnSlow);
             toolbar.Controls.Add(_btnNormal);
             toolbar.Controls.Add(_btnFast);
+            
+            // --- Sélecteur de dos de carte ---
+            StyleButton(_btnBackStyle);
+            UpdateBackButtonCaption();
+            _btnBackStyle.Click += (_, __) =>
+            {
+                BuildCardBackMenu();
+                _menuBacks.Show(_btnBackStyle, new Point(0, _btnBackStyle.Height));
+            };
+            toolbar.Controls.Add(new Panel { Width = 8, Height = 1 });
+            toolbar.Controls.Add(_btnBackStyle);
+            
             Controls.Add(toolbar);
 
             // Espace sous la toolbar
@@ -266,6 +278,10 @@ namespace FishingGame.WinForms.Screens
 
             _drawStack.ImageBox.SizeMode    = PictureBoxSizeMode.Zoom;
             _depositStack.ImageBox.SizeMode = PictureBoxSizeMode.Zoom;
+            
+            // --- échelle des piles (+25 %) ---
+            _stackBaseSize = _drawStack.Size;    // base (130x180 dans les Fields)
+            ApplyStackScale(STACK_SCALE);        // agrandit + recentre
 
             // Recentrages fiables
             _board.Resize += (_, __) => CenterPiles();
@@ -379,23 +395,27 @@ namespace FishingGame.WinForms.Screens
                 _bottomHand.SetCards(imgs);
             }
             else _bottomHand.ClearCards();
-            
+
             // Gauche/Droite : dos uniquement
             if (_leftPlayer != null)
             {
                 _leftHand.ClearCards();
-                _leftHand.SetBacks(_leftPlayer.Player.Hand.Count, _cardBack!);
+                if (_cardBack != null)
+                    _leftHand.SetBacks(_leftPlayer.Player.Hand.Count, _cardBack);
             }
             else _leftHand.ClearCards();
-                
+
             if (_rightPlayer != null)
             {
                 _rightHand.ClearCards();
-                _rightHand.SetBacks(_rightPlayer.Player.Hand.Count, _cardBack!);
+                if (_cardBack != null)
+                    _rightHand.SetBacks(_rightPlayer.Player.Hand.Count, _cardBack);
             }
             else _rightHand.ClearCards();
 
-            // Compteurs de piles (exposés par le domaine)
+            // Ajuste la hauteur réelle pour autoriser le zoom 25% sans rognage
+            EnsureBottomHandRoom();
+
             _lblCounts.Text = $"Pioche: {_game.DrawPileCount} | Dépôt: {_game.DepositPileCount}";
         }
 
@@ -595,6 +615,53 @@ namespace FishingGame.WinForms.Screens
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
             e.Graphics.DrawImage(_colorOverlayImg, new Rectangle(x, y, w, h));
+        }
+        
+        // Construit le menu contextuel avec les dos disponibles
+        private void BuildCardBackMenu()
+        {
+            _menuBacks.Items.Clear();
+            var options = GetAvailableCardBacks();
+            if (options.Count == 0)
+            {
+                _menuBacks.Items.Add(new ToolStripMenuItem("(Aucun dos trouvé)") { Enabled = false });
+                return;
+            }
+
+            foreach (var key in options.Keys.OrderBy(k => k))
+            {
+                var mi = new ToolStripMenuItem(ToTitle(key))
+                {
+                    Checked = string.Equals(key, _cardBackKey, StringComparison.OrdinalIgnoreCase)
+                };
+                mi.Click += (_, __) => ApplyCardBack(key);
+                _menuBacks.Items.Add(mi);
+            }
+        }
+
+        private void UpdateBackButtonCaption()
+        {
+            _btnBackStyle.Text = $"Dos : {ToTitle(_cardBackKey)}";
+        }
+
+        private static string ToTitle(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return key;
+            return char.ToUpperInvariant(key[0]) + key.Substring(1).ToLowerInvariant();
+        }
+        
+        private void ApplyStackScale(float factor)
+        {
+            if (_stackBaseSize.Width <= 0 || _stackBaseSize.Height <= 0) return;
+
+            var newSize = new Size(
+                (int)Math.Round(_stackBaseSize.Width  * factor),
+                (int)Math.Round(_stackBaseSize.Height * factor));
+
+            _drawStack.Size    = newSize;
+            _depositStack.Size = newSize;
+
+            CenterPiles(); // recalcule l’emplacement au centre du plateau
         }
     }
 }

@@ -38,12 +38,19 @@ namespace FishingGame.WinForms.Controls
 
         public bool VerticalCenter { get; set; } = true;
         public Color Fill { get; set; } = Color.Transparent;
+        
+        // Contrainte : garder la carte zoomée DANS le contrôle
+        public bool ClampHoverInside { get; set; } = true;
 
         // pastille "joueur actif"
         private bool _active;
 
         // ratio par défaut si aucune image (H/W ≈ 3:2)
         private const double DefaultAspect = 1.5;
+        
+        // Survol : facteur d’agrandissement (1.25x) et marge réservée (12.5%)
+        private const double HoverScale = 1.25;
+        private const double HoverPadFactor = (HoverScale - 1.0) / 2.0; // 0.125
 
         public OverlapHandControl()
         {
@@ -94,7 +101,8 @@ namespace FishingGame.WinForms.Controls
         public Func<int, bool>? AllowHoverCallback { get; set; }
 
         // --------------------------------------------------------------------------
-        protected override void OnMouseMove(MouseEventArgs e) {
+        protected override void OnMouseMove(MouseEventArgs e) 
+        {
             base.OnMouseMove(e);
             if (!Enabled) return;
             int idx = HitTestCardIndex(e.Location);
@@ -105,9 +113,11 @@ namespace FishingGame.WinForms.Controls
                 Invalidate();
             }
         }
-        protected override void OnMouseLeave(EventArgs e) {
+        protected override void OnMouseLeave(EventArgs e) 
+        {
             base.OnMouseLeave(e);
-            if (_hoverIndex != -1) {
+            if (_hoverIndex != -1) 
+            {
                 _hoverIndex = -1;
                 Invalidate();
             }
@@ -134,16 +144,11 @@ namespace FishingGame.WinForms.Controls
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             
-            // Ratio dynamique depuis la 1re image dispo
+            // Ratio depuis la 1re image dispo
             double aspect = DefaultAspect;
-            for (int i = 0; i < Cards.Count; i++)
+            foreach (var img in Cards)
             {
-                var img = Cards[i];
-                if (img != null && img.Width > 0)
-                {
-                    aspect = img.Height / (double)img.Width;
-                    break;
-                }
+                if (img != null && img.Width > 0) { aspect = img.Height / (double)img.Width; break; }
             }
 
             // Taille carte + pas (décalage)
@@ -199,9 +204,12 @@ namespace FishingGame.WinForms.Controls
                 }
             }
 
-            // calculs w, h, step identiques…
+            // Y : si bande du bas, on remonte de hoverPad et on assure aucun débordement
+            int hoverPad = (int)Math.Round(h * HoverPadFactor); // 12.5%
             int x = 6;
-            int y = VerticalCenter ? (ClientSize.Height - h) / 2 : (ClientSize.Height - h);
+            int y = VerticalCenter
+                ? (ClientSize.Height - h) / 2
+                : Math.Max(6, ClientSize.Height - h - hoverPad - 3); // -3 => sécurité hauteur
 
             // Variables locales pour l’image et la zone de la carte survolée
             Image?     hoveredImage = null;
@@ -236,15 +244,24 @@ namespace FishingGame.WinForms.Controls
                 g.FillEllipse(brush, dotRect);
             }
 
-            // Dessiner la carte survolée en dernier et agrandie de 25 %
+            // Dessiner la carte survolée en dernier et agrandie de 25%
             if (hoveredImage != null && hoveredRect.HasValue)
             {
                 var rect  = hoveredRect.Value;
-                int bigW  = (int)Math.Round(w * 1.25);
-                int bigH  = (int)Math.Round(h * 1.25);
+                int bigW  = (int)Math.Round(w * HoverScale);
+                int bigH  = (int)Math.Round(h * HoverScale);
                 int offX  = (bigW - w) / 2;
                 int offY  = (bigH - h) / 2;
                 var bigRect = new Rectangle(rect.X - offX, rect.Y - offY, bigW, bigH);
+                
+                if (ClampHoverInside)
+                {
+                    if (bigRect.Left   < 0) bigRect.X = 0;
+                    if (bigRect.Top    < 0) bigRect.Y = 0;
+                    if (bigRect.Right  > ClientSize.Width)  bigRect.X = Math.Max(0, ClientSize.Width  - bigRect.Width);
+                    if (bigRect.Bottom > ClientSize.Height) bigRect.Y = Math.Max(0, ClientSize.Height - bigRect.Height);
+                }
+                
                 g.DrawImage(hoveredImage, bigRect);
             }
         }
@@ -300,13 +317,15 @@ namespace FishingGame.WinForms.Controls
                 }
             }
 
-            int x = 6;
-            int y = VerticalCenter ? (ClientSize.Height - h) / 2 : (ClientSize.Height - h);
+            int hoverPad = (int)Math.Round(h * HoverPadFactor);
+            int x0 = 6;
+            int y0 = VerticalCenter ? (ClientSize.Height - h) / 2
+                : Math.Max(6, ClientSize.Height - h - hoverPad - 3);
 
-            // Parcours inverse pour respecter le recouvrement (dernière carte au-dessus)
+            // Parcours inverse pour respecter le recouvrement
             for (int i = Cards.Count - 1; i >= 0; i--)
             {
-                var rect = new Rectangle(x + i * step, y, w, h);
+                var rect = new Rectangle(x0 + i * step, y0, w, h);
                 if (rect.Contains(pt)) return i;
             }
             return -1;

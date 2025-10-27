@@ -164,6 +164,12 @@ namespace FishingGame.WinForms.Screens
 
         private async void _btnReset_Click(object? s, EventArgs e)
         {
+            try { _animCts.Cancel(); } catch { }
+            _animCts = new CancellationTokenSource();
+
+            InvalidateImageCache();  // <<— flush des anciens visuels
+            LoadBackImage(preserveDeposit: false);
+            
             await StopGameAsync();
             ResetUI();
             UpdateButtonsByState();
