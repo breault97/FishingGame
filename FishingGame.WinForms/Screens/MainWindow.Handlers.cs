@@ -1,5 +1,7 @@
 ﻿﻿using FishingGame.Domain.Events;
 using FishingGame.Domain.Interfaces;
+using FishingGame.WinForms.Dialogs;
+using FishingGame.Domain.Enums;
 
 namespace FishingGame.WinForms.Screens
 {
@@ -57,11 +59,36 @@ namespace FishingGame.WinForms.Screens
 
                 _game.UiRenderDelayMs = _delayMs;
                 _game.Begin(7);
+                _game.FlipFirstCard();
 
                 // Prime UI immédiat : impose backs sur adversaires AVANT toute anim
                 await UI(() =>
                 {
                     EnsureSeats();
+                    
+                    // configuration du pont pour joueur humain
+                    if (_chkHuman.Checked)
+                    {
+                        _humanInput = new FishingGame.Controller.HumanInput();
+                        _game.HumanInput = _humanInput;
+                        _humanPlayer = _seatBottom;
+                        if (_seatBottom != null) _seatBottom.IsHuman = true;
+                        if (_seatLeft != null) _seatLeft.IsHuman = false;
+                        if (_seatRight != null) _seatRight.IsHuman = false;
+                    }
+                    else
+                    {
+                        _humanInput = null;
+                        _game.HumanInput = null;
+                        _humanPlayer = null;
+                        if (_seatBottom != null) _seatBottom.IsHuman = false;
+                        if (_seatLeft != null) _seatLeft.IsHuman = false;
+                        if (_seatRight != null) _seatRight.IsHuman = false;
+                    }
+                    // désactiver la case pour qu'on ne change pas en pleine partie
+                    _chkHuman.Enabled = false;
+
+                    
                     UpdatePlayersSlots();
 
                     // Bas en faces, adversaires en backs uniquement
@@ -194,6 +221,14 @@ namespace FishingGame.WinForms.Screens
             _btnStart.Enabled = true;
             _btnReset.Enabled = false;
             _btnStep.Enabled  = !_chkAuto.Checked;
+            
+            _isHumanTurn = false;
+            _humanPendingDraw = 0;
+            _humanTopCard = null;
+            _humanInput?.Reset();
+            _humanInput = null;
+            _humanPlayer = null;
+            _chkHuman.Enabled = true;  // l’utilisateur peut à nouveau changer de mode
 
             UpdateButtonsByState();
         }
@@ -209,6 +244,8 @@ namespace FishingGame.WinForms.Screens
             g.DeckAlmostEmpty += OnInfo;
             g.OneCard         += OnOneCard;
             g.GameWon         += OnGameWon;
+            g.HumanTurnStarted += OnHumanTurnStarted;
+            g.HumanTurnSkipped += OnHumanTurnSkipped;
         }
 
         private void UnWire(IFishingGameObserver game)
@@ -219,6 +256,11 @@ namespace FishingGame.WinForms.Screens
             game.DeckAlmostEmpty -= OnInfo;
             game.OneCard         -= OnOneCard;
             game.GameWon         -= OnGameWon;
+            
+            if (game is FishingGame.Controller.FishingGame fg) {
+                fg.HumanTurnStarted -= OnHumanTurnStarted;
+                fg.HumanTurnSkipped -= OnHumanTurnSkipped;
+            }
         }
 
         // ───────────────────────────────────────────────────────────────────────
@@ -250,7 +292,7 @@ namespace FishingGame.WinForms.Screens
         }
 
         // ───────────────────────────────────────────────────────────────────────
-        // HANDLERS — visibles: seulement les infos “partie”
+        // HANDLERS — visibles : seulement les infos “partie”
         // ───────────────────────────────────────────────────────────────────────
 
         private void OnTurnPlayed(object? sender, TurnEventArgs e)
@@ -375,7 +417,7 @@ namespace FishingGame.WinForms.Screens
 
         private void OnInfo(object s, InfoEventArgs e)
         {
-            // Infos “ConsoleLogger”: TOUJOURS visibles
+            // Infos “ConsoleLogger” : TOUJOURS visibles
             if (!InvokeRequired)
             {
                 BeginInvoke(new Action(() =>
@@ -408,6 +450,125 @@ namespace FishingGame.WinForms.Screens
             });
             _stepTcs?.TrySetResult(null); // libère un pas à pas éventuel
             await Task.Delay(500);
+        }
+        
+        private void OnHumanTurnStarted(object? sender, HumanTurnEventArgs e) {
+            if (_game == null) return;
+            UI(() => {
+                _humanPlayer      = _bottomPlayer?.Player;
+                _humanTopCard     = e.TopCard;
+                _humanPendingDraw = e.PendingDraw;
+                _isHumanTurn      = true;
+
+                // Allume immédiatement la pastille verte du joueur
+                SetActivePlayer(e.Player);
+                RenderActiveBadgeUI();
+
+                // Active la main et configure l’agrandissement sur cartes jouables
+                _bottomHand.Enabled = true;
+                if (_humanPlayer != null) {
+                    _bottomHand.AllowHoverCallback = idx => {
+                        try {
+                            if (!_isHumanTurn || _game == null || _humanPlayer == null) return false;
+                            if (idx < 0 || idx >= _humanPlayer.Hand.Count) return false;
+                            var c = _humanPlayer.Hand.ElementAt(idx);
+                            return _game.IsCardPlayable(c);
+                        } catch { return false; }
+                    };
+                } else {
+                    _bottomHand.AllowHoverCallback = null;
+                }
+
+                // Alerte sur les +2
+                if (_humanPendingDraw > 0 && _humanPlayer != null) {
+                    bool hasTwo = _humanPlayer.Hand.Any(c => c.Value == CARD_VALUE.TWO);
+                    if (!hasTwo) ShowAlert($"Tu dois piocher {_humanPendingDraw} cartes!");
+                    else ShowAlert($"Attaque +{_humanPendingDraw} \n Tu peux contrer avec un 2.");
+                }
+            });
+        }
+
+        private void OnHumanTurnSkipped(object? sender, PlayerEventArgs e) {
+            UI(() => {
+                _isHumanTurn = false;
+                _bottomHand.Enabled = false;
+                _bottomHand.AllowHoverCallback = null;
+                ShowAlert("Ton tour est passé!");
+                _humanInput?.Reset();
+            });
+        }
+
+        private void OnBottomHandCardClicked(object? sender, int index) {
+            if (!_isHumanTurn) { ShowAlert("Ce n'est pas votre tour."); return; }
+            if (_game == null || _humanPlayer == null) return;
+            if (index < 0 || index >= _humanPlayer.Hand.Count) return;
+
+            var card = _humanPlayer.Hand.ElementAt(index);
+            if (!_game.IsCardPlayable(card)) {
+                ShowAlert("Cette carte n'est pas jouable.");
+                return;
+            }
+            COLOR_TYPE? chosenColor = null;
+            if (card.Value == CARD_VALUE.JACK) {
+                chosenColor = ChooseColorForm.Prompt(this);
+                if (chosenColor == null) {
+                    ShowAlert("Aucune couleur choisie! \n L'action est annulée.");
+                    return;
+                }
+            }
+            _isHumanTurn = false;
+            _bottomHand.Enabled = false;
+            _bottomHand.AllowHoverCallback = null;
+            _humanInput?.SubmitPlay(card, chosenColor);
+        }
+
+        private void OnDrawStackClicked(object? sender, EventArgs e) {
+            if (!_isHumanTurn) return;
+            _isHumanTurn = false;
+            _bottomHand.Enabled = false;
+            _bottomHand.AllowHoverCallback = null;
+            _humanInput?.SubmitDraw();
+        }
+
+        // Agrandissement de la pioche
+        private void OnDrawStackMouseEnter(object? sender, EventArgs e) {
+            // Ne rien faire si ce n’est pas le tour du joueur humain
+            if (!_isHumanTurn) return;
+
+            if (_drawStackOriginalSize == null) {
+                _drawStackOriginalSize = _drawStack.Size;
+                _drawStackOriginalLocation = _drawStack.Location;
+            }
+            if (_drawStackOriginalSize.HasValue && _drawStack.Size == _drawStackOriginalSize.Value) {
+                var orig    = _drawStackOriginalSize.Value;
+                var newSize = new Size((int)(orig.Width * 1.25), (int)(orig.Height * 1.25));
+                var centerX = _drawStackOriginalLocation!.Value.X + orig.Width / 2;
+                var centerY = _drawStackOriginalLocation!.Value.Y + orig.Height / 2;
+                var newLoc  = new Point(centerX - newSize.Width / 2, centerY - newSize.Height / 2);
+                _drawStack.Size     = newSize;
+                _drawStack.Location = newLoc;
+                _drawStack.BringToFront();
+            }
+        }
+        
+        private void OnDrawStackMouseLeave(object? sender, EventArgs e) {
+            if (_drawStackOriginalSize.HasValue && _drawStackOriginalLocation.HasValue) {
+                _drawStack.Size = _drawStackOriginalSize.Value;
+                _drawStack.Location = _drawStackOriginalLocation.Value;
+            }
+        }
+
+        /// <summary>Affiche un message à l’utilisateur via la fenêtre personnalisée.</summary>
+        private void ShowAlert(string message) {
+            if (InvokeRequired) {
+                BeginInvoke(new Action(() => ShowAlert(message)));
+                return;
+            }
+            try {
+                FishingGame.WinForms.Dialogs.AlertForm.Show(this, message);
+            } catch {
+                AddInfo(message);
+            }
         }
     }
 }

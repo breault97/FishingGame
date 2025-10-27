@@ -15,6 +15,8 @@ namespace FishingGame.Domain.Class
         public bool IsMinimise { get; set; }
         public List<IStrategy> Strategies { get; set; }
         public PLAYER_MODE Mode { get; set; }
+        public bool IsHuman { get; set; } = false;
+
         public int FinalScore {
             get
             {

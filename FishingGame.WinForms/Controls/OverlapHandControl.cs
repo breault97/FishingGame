@@ -14,6 +14,8 @@ namespace FishingGame.WinForms.Controls
         public int ActiveDotSize { get; set; } = 32;                // pastille verte
         public Point ActiveDotOffset { get; set; } = new Point(8,8); // marge
         public bool ShowActiveDot { get; set; } = false;
+        private int _hoverIndex = -1;
+        public event EventHandler<int>? CardClicked;
 
         // Partie visible de la carte suivante (0.05..0.95)
         private float _visibleRatio = 0.70f;
@@ -87,9 +89,30 @@ namespace FishingGame.WinForms.Controls
             _active = active;
             Invalidate();
         }
+        
+        // Fonction qui indique si une carte est survolable
+        public Func<int, bool>? AllowHoverCallback { get; set; }
 
         // --------------------------------------------------------------------------
-
+        protected override void OnMouseMove(MouseEventArgs e) {
+            base.OnMouseMove(e);
+            if (!Enabled) return;
+            int idx = HitTestCardIndex(e.Location);
+            bool allow = idx >= 0 && (AllowHoverCallback?.Invoke(idx) ?? false);
+            int newIndex = allow ? idx : -1;
+            if (newIndex != _hoverIndex) {
+                _hoverIndex = newIndex;
+                Invalidate();
+            }
+        }
+        protected override void OnMouseLeave(EventArgs e) {
+            base.OnMouseLeave(e);
+            if (_hoverIndex != -1) {
+                _hoverIndex = -1;
+                Invalidate();
+            }
+        }
+        
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             if (Fill == Color.Transparent && Parent != null)
@@ -110,7 +133,7 @@ namespace FishingGame.WinForms.Controls
             g.SmoothingMode = SmoothingMode.HighQuality;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
+            
             // Ratio dynamique depuis la 1re image dispo
             double aspect = DefaultAspect;
             for (int i = 0; i < Cards.Count; i++)
@@ -176,26 +199,124 @@ namespace FishingGame.WinForms.Controls
                 }
             }
 
+            // calculs w, h, step identiques…
             int x = 6;
-            int y = VerticalCenter ? (ClientSize.Height - h) / 2
-                                   : (ClientSize.Height - h); // collé en bas
+            int y = VerticalCenter ? (ClientSize.Height - h) / 2 : (ClientSize.Height - h);
 
+            // Variables locales pour l’image et la zone de la carte survolée
+            Image?     hoveredImage = null;
+            Rectangle? hoveredRect  = null;
+
+            // Dessiner toutes les cartes sauf la survolée
             for (int i = 0; i < Cards.Count; i++)
             {
-                var img = Cards[i];
-                if (img != null)
-                    g.DrawImage(img, new Rectangle(x, y, w, h));
-                x += step; // recouvrement vient du fait que step < w
+                var img  = Cards[i];
+                var rect = new Rectangle(x, y, w, h);
+
+                // Si c’est la carte survolée et qu’elle est autorisée, on retarde son dessin
+                if (_hoverIndex == i && (AllowHoverCallback?.Invoke(i) ?? true))
+                {
+                    hoveredImage = img;
+                    hoveredRect  = rect;
+                }
+                else
+                {
+                    if (img != null) g.DrawImage(img, rect);
+                }
+
+                x += step; // recouvrement
             }
 
             // Pastille verte (joueur actif)
             if (_active && ShowActiveDot)
             {
-                using var b = new SolidBrush(Color.LimeGreen);
+                using var brush = new SolidBrush(Color.LimeGreen);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                var r = new Rectangle(ActiveDotOffset, new Size(ActiveDotSize, ActiveDotSize));
-                g.FillEllipse(b, r);
+                var dotRect = new Rectangle(ActiveDotOffset, new Size(ActiveDotSize, ActiveDotSize));
+                g.FillEllipse(brush, dotRect);
             }
+
+            // Dessiner la carte survolée en dernier et agrandie de 25 %
+            if (hoveredImage != null && hoveredRect.HasValue)
+            {
+                var rect  = hoveredRect.Value;
+                int bigW  = (int)Math.Round(w * 1.25);
+                int bigH  = (int)Math.Round(h * 1.25);
+                int offX  = (bigW - w) / 2;
+                int offY  = (bigH - h) / 2;
+                var bigRect = new Rectangle(rect.X - offX, rect.Y - offY, bigW, bigH);
+                g.DrawImage(hoveredImage, bigRect);
+            }
+        }
+        
+        private int HitTestCardIndex(Point pt)
+        {
+            int availW = ClientSize.Width - 12;
+            int availH = ClientSize.Height - 12;
+            if (availW <= 0 || availH <= 0 || Cards.Count == 0) return -1;
+
+            // Calcule les dimensions de la carte et l’écart
+            // (reprend les mêmes calculs que dans OnPaint)
+            double aspect = 1.5;
+            foreach (var img in Cards)
+            {
+                if (img != null && img.Width > 0) { aspect = (double)img.Height / img.Width; break; }
+            }
+            int w, h, step;
+            double vis = Math.Clamp(VisibleRatio, 0.05f, 0.95f);
+
+            if (UseWidthForScale)
+            {
+                w = Math.Min(MaxCardWidth, Math.Max(48, availW - 8));
+                h = (int)Math.Round(w * aspect);
+                if (h > availH)
+                {
+                    double s = availH / (double)h;
+                    w = Math.Max(32, (int)Math.Round(w * s));
+                    h = availH;
+                }
+                step = Math.Max(6, (int)Math.Round(w * vis));
+                int totalW = w + (Cards.Count - 1) * step;
+                if (totalW > availW)
+                {
+                    double s = availW / (double)totalW;
+                    w = Math.Max(32, (int)Math.Round(w * s));
+                    h = Math.Max(32, (int)Math.Round(h * s));
+                    step = Math.Max(6, (int)Math.Round(step * s));
+                }
+            }
+            else
+            {
+                h = Math.Min(MaxCardHeight, Math.Max(60, availH - 8));
+                w = (int)Math.Round(h / aspect);
+                step = Math.Max(6, (int)Math.Round(w * vis));
+                int totalW = w + (Cards.Count - 1) * step;
+                if (totalW > availW)
+                {
+                    double s = availW / (double)totalW;
+                    w = Math.Max(32, (int)Math.Round(w * s));
+                    h = Math.Max(32, (int)Math.Round(h * s));
+                    step = Math.Max(6, (int)Math.Round(step * s));
+                }
+            }
+
+            int x = 6;
+            int y = VerticalCenter ? (ClientSize.Height - h) / 2 : (ClientSize.Height - h);
+
+            // Parcours inverse pour respecter le recouvrement (dernière carte au-dessus)
+            for (int i = Cards.Count - 1; i >= 0; i--)
+            {
+                var rect = new Rectangle(x + i * step, y, w, h);
+                if (rect.Contains(pt)) return i;
+            }
+            return -1;
+        }
+        
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            int index = HitTestCardIndex(e.Location);
+            if (index >= 0) CardClicked?.Invoke(this, index);
         }
     }
 }

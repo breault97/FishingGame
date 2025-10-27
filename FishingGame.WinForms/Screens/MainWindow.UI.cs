@@ -146,6 +146,7 @@ namespace FishingGame.WinForms.Screens
             toolbar.Controls.Add(_btnReset);
             toolbar.Controls.Add(new Panel { Width = 16, Height = 1 });
             toolbar.Controls.Add(_chkAuto);
+            toolbar.Controls.Add(_chkHuman);
             toolbar.Controls.Add(_btnStep);
             toolbar.Controls.Add(new Panel { Width = 16, Height = 1 });
 
@@ -181,6 +182,15 @@ namespace FishingGame.WinForms.Screens
 
             // Espace sous la toolbar
             Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10, BackColor = _bg });
+            
+            // Accrocher les événements de clic pour joueur humain
+            _bottomHand.CardClicked      += OnBottomHandCardClicked;
+            _drawStack.Click             += OnDrawStackClicked;
+            _drawStack.ImageBox.Click    += OnDrawStackClicked;
+            _drawStack.MouseEnter        += OnDrawStackMouseEnter;
+            _drawStack.MouseLeave        += OnDrawStackMouseLeave;
+            _drawStack.ImageBox.MouseEnter += OnDrawStackMouseEnter;
+            _drawStack.ImageBox.MouseLeave += OnDrawStackMouseLeave;
 
             // ─────────────────────────────
             // Journal

@@ -1,4 +1,5 @@
 ﻿using FishingGame.Domain.Class;
+using FishingGame.Domain.Struct;
 using FishingGame.WinForms.Controls;
 
 namespace FishingGame.WinForms.Screens
@@ -15,6 +16,28 @@ namespace FishingGame.WinForms.Screens
         }
         
         private FishingGame.Controller.FishingGame? _game;
+        
+        // Vérification pour joueur Humain
+        private readonly CheckBox _chkHuman = new() {
+            Text = "Jouer",
+            Checked = true,          // décoché = mode spectateur
+            ForeColor = Color.White,
+            AutoSize = true
+        };
+        
+        // Pont vers le backend pour l’input humain
+        private FishingGame.Controller.HumanInput? _humanInput;
+        // Joueur humain assigné (si on joue)
+        private Player? _humanPlayer;
+        // Indicateur de tour
+        private bool _isHumanTurn;
+        // Pénalité +2 en cours pour l’humain
+        private int _humanPendingDraw;
+        // Carte au sommet au début du tour humain
+        private Card? _humanTopCard;
+        // Tailles initiales pour agrandissement de la pioche
+        private Size? _drawStackOriginalSize;
+        private Point? _drawStackOriginalLocation;
         
         // Mode & tempo
         private volatile bool _auto = true;   // Auto coché/décoché pilote le gate
